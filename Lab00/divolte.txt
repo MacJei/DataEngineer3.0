@@ -1,0 +1,272 @@
+Divolte:
+cd /home/kruchininilya77
+wget http://divolte-releases.s3-website-eu-west-1.amazonaws.com/divolte-collector/0.9.0/distributions/divolte-collector-0.9.0.tar.gz
+tar -xzf divolte-collector-0.9.0.tar.gz
+cd divolte-collector-0.9.0
+touch conf/divolte-collector.conf
+
+Перейдите в папку conf.
+cd conf
+
+Переименуйте файл divolte-env.sh.example в divolte-env.sh.
+mv divolte-env.sh.example divolte-env.sh
+3.0.1.0-187
+Отредактируйте его, добавив туда: HADOOP_CONF_DIR=/usr/hdp/3.0.1.0-187/hadoop/conf
+## Старая версия HADOOP_CONF_DIR=/usr/hdp/3.0.0.0-1634/hadoop/conf
+
+sudo nano divolte-env.sh
+
+Теперь очередь divolte-collector.conf.
+sudo nano divolte-collector.conf
+
+Туда добавьте следующее: (HDFS):
+
+divolte {
+  global {
+
+    server {
+      host = 0.0.0.0
+      port = 8290
+    }
+
+    hdfs {
+      client {
+        fs.defaultFS = "hdfs://de3-node1.europe-west1-b.c.dataengineer-218321.internal:8020"
+      }
+      // Enable HDFS sinks.
+      enabled = true
+
+      // Use multiple threads to write to HDFS.
+      threads = 2
+    }
+  }
+
+  sinks {
+    // The name of the sink. ("It's referred to by the mapping.")
+    hdfs {
+      type = hdfs
+
+      // For HDFS sinks we can control how the files are created.
+      file_strategy {
+        // Create a new file every hour
+        roll_every = 1 hour
+
+        // Perform a hsync call on the HDFS files after every 1000 records are written
+        // or every 5 seconds, whichever happens first.
+
+        // Performing a hsync call periodically can prevent data loss in the case of
+        // some failure scenarios.
+        sync_file_after_records = 1000
+        sync_file_after_duration = 5 seconds
+
+        // Files that are being written will be created in a working directory.
+        // Once a file is closed, Divolte Collector will move the file to the
+        // publish directory. The working and publish directories are allowed
+        // to be the same, but this is not recommended.
+        working_dir = "/divolte/inflight"
+        publish_dir = "/divolte/published"
+      }
+
+      // Set the replication factor for created files.
+      replication = 3
+    }
+  }
+
+  sources {
+    a_source {
+      type = browser
+      prefix = /
+    }
+  }
+}
+
+Этот конфиг позволит вам сохранять кликстрим на HDFS. Обратите внимание, что в fs.defaultFS вам нужно добавить FQDN вашего сервера.
+
+Чтобы всё заработало, надо сделать две вещи. Первая — это создать на HDFS две папки, которые мы указали в конфиге в working_dir и publish_dir. Для этого перейдите под юзера hdfs:
+
+sudo su hdfs
+hdfs dfs -mkdir /divolte
+hdfs dfs -mkdir /divolte/inflight
+hdfs dfs -mkdir /divolte/published
+
+Проверяем:
+hdfs dfs -ls /divolte
+hdfs dfs -ls /divolte/inflight
+hdfs dfs -ls /divolte/published
+
+Поменяем права на директорию divolte, чтобы был доступ к записи у других юзеров:
+hdfs dfs -chmod -R 0777 /divolte
+
+Конфиг для Kafka (Kafka-divolte):
+
+divolte {
+  global {
+
+    server {
+      host = 0.0.0.0
+      port = 8290
+    }
+
+    kafka {
+      // Enable Kafka flushing
+      enabled = true
+      // The properties under the producer key in this
+      // configuration are used to create a Properties object
+      // which is passed to Kafka as is. At the very least,
+      // configure the broker list here. For more options
+      // that can be passed to a Kafka producer, see this link:
+      // https://kafka.apache.org/documentation.html#producerconfigs
+      producer = {
+        bootstrap.servers = "de3-node1.europe-west1-b.c.dataengineer-218321.internal:6667"
+      }
+    }
+  }
+  sinks {
+    // The name of the sink. ("It's referred to by the mapping.")
+    kafka {
+      type = kafka
+      // This is the name of the topic that data will be produced on
+      topic = ilya.kruchinin
+    }
+  }
+}
+
+Копируем файл:
+cp /usr/hdp/3.0.1.0-187/hadoop-hdfs/hadoop-hdfs-client.jar /home/kruchininilya77/divolte-collector-0.9.0/lib/
+
+Запускаем divolte:
+./bin/divolte-collector
+
+Kafka консьюмер:
+bin/kafka-console-consumer.sh --zookeeper 35.233.44.60:2181 --topic ilya.kruchinin --from-beginning
+
+Тест Divolte
+http://35.233.44.60:8290/#/fragment/path?q=textual&n=42
+
+JS:
+Так как магазин находится в облаке и доступ к машине не представляется возможным, то получить доступ к divolte.js с кластера можно посредством require.js
+
+Конечный скрипт выглядит следующим образом:
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mustache.js/3.0.0/mustache.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.3.1.js"></script>
+<script src="https://requirejs.org/docs/release/2.3.6/minified/require.js"></script>
+<script>
+    requirejs.config({
+      paths: {
+        divolte: 'http://35.233.44.60:8290/divolte'
+      }
+    });
+    require(['divolte']);
+    require(['divolte'], function(divolte) {
+      checkout_click = function() {
+        divolte.signal("checkout", {"price": document.getElementsByClassName('basket-coupon-block-total-price-current')[0].innerText});
+        return false;
+      };
+      $(document.body).on('click', '.basket-btn-checkout', checkout_click);
+    });
+</script>
+
+<script src="https://newprolab-zs.ml/divolte.js"></script>
+<script>
+
+-- Новы скрипт - Сергей Зайкин
+<script src="http://35.233.44.60:8290/divolte.js"></script>
+<script>
+
+function addEvent(element, evnt, funct){
+  if (element.attachEvent)
+      return element.attachEvent('on'+evnt, funct);
+  else
+      return element.addEventListener(evnt, funct, false);
+}
+
+addEvent(document, "DOMContentLoaded", function(event) {
+   try {
+    var elem = document.getElementsByClassName("btn btn-lg btn-primary basket-btn-checkout")[0];
+    addEvent(
+      elem,
+      'click',
+      function () { 
+          divolte.signal('order', {price: document.getElementsByClassName("basket-coupon-block-total-price-current")[0].innerHTML.replace(' руб.', '').replace(' ', '')});
+          console.log('path - '+window.location.href);
+      }
+    );
+  } catch (err) {
+    console.log(err)
+  }
+})
+</script>
+
+Запускаем divolte:
+./bin/divolte-collector
+
+Зайдите теперь на свой сайт и покликайте, попереходите на разные страницы.
+Вернитесь в терминал и нажмите Ctrl+C. 
+
+Теперь посмотрите, появилось ли что-то в папке /divolte/published на HDFS:
+hdfs dfs -find /divolte/published/ -name '*divolte-tracking-*.avro' | sort | tail -n1| xargs /home/kruchininilya77/divolte-collector-0.9.0/bin/avro-tools tojson --pretty
+
+/*
+hdfs dfs -find /divolte/published '*divolte-tracking-*.avro' | sort | tail -n1 | xargs ~/divolte-collector-0.9.0/bin/avro-tools tojson --pretty | less
+
+hdfs dfs -find /divolte/published/ -name '*divolte-tracking-*.avro' | sort | tail -n1| xargs ~/divolte-collector-0.9.0/bin/avro-tools tojson --pretty
+
+hdfs dfs -tail /divolte/published/20181010173741-divolte-tracking-de3-1-2.avr
+*/
+
+Создаем mapper для divolte
+sudo su
+cd /divolte-collector-0.9.0/conf
+> MyEventRecord.avsc
+sudo nano MyEventRecord
+
+Добавляем в файл скрипт:
+{
+  "namespace": "io.divolte.examples.record",
+  "type": "record",
+  "name": "MyEventRecord",
+  "fields": [
+    { "name": "timestamp",  "type": "long" },
+    { "name": "remoteHost", "type": "string"},
+    { "name": "eventType",  "type": ["null", "string"], "default": null },
+    { "name": "location",   "type": ["null", "string"], "default": null },
+    { "name": "localPath",  "type": ["null", "string"], "default": null },
+    { "name": "q",          "type": ["null", "string"], "default": null },
+    { "name": "n",          "type": ["null", "int"],    "default": null }
+  ]
+}
+
+> mapping.groovy
+sudo nano mapping.groovy
+
+mapping {
+  map timestamp() onto 'timestamp'
+  map remoteHost() onto 'remoteHost'
+  map eventType() onto 'eventType'
+  map location() onto 'location'
+
+  def locationUri = parse location() to uri
+  def localUri = parse locationUri.rawFragment() to uri
+  map localUri.path() onto 'localPath'
+
+  def localQuery = localUri.query()
+  map localQuery.value('q') onto 'q'
+  map { parse localQuery.value('n') to int32 } onto 'n'
+}
+
+sudo nano divolte-collector.conf
+
+divolte {
+  mappings {
+    my_mapping = {
+      schema_file = "/home/kruchininilya77/divolte-collector-0.9.0/conf/MyEventRecord.avsc"
+      mapping_script_file = "/home/kruchininilya77/divolte-collector-0.9.0/conf/mapping.groovy"
+      sources = [browser]
+      sinks = [hdfs]
+    }
+  }
+}
+
+Запускаем  divolte:
+./bin/divolte-collector
