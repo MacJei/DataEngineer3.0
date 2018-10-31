@@ -97,54 +97,18 @@ hdfs dfs -ls /divolte/published
 Поменяем права на директорию divolte, чтобы был доступ к записи у других юзеров:
 hdfs dfs -chmod -R 0777 /divolte
 
-Конфиг для Kafka (Kafka-divolte):
-
-divolte {
-  global {
-
-    server {
-      host = 0.0.0.0
-      port = 8290
-    }
-
-    kafka {
-      // Enable Kafka flushing
-      enabled = true
-      // The properties under the producer key in this
-      // configuration are used to create a Properties object
-      // which is passed to Kafka as is. At the very least,
-      // configure the broker list here. For more options
-      // that can be passed to a Kafka producer, see this link:
-      // https://kafka.apache.org/documentation.html#producerconfigs
-      producer = {
-        bootstrap.servers = "de3-node1.europe-west1-b.c.dataengineer-218321.internal:6667"
-      }
-    }
-  }
-  sinks {
-    // The name of the sink. ("It's referred to by the mapping.")
-    kafka {
-      type = kafka
-      // This is the name of the topic that data will be produced on
-      topic = ilya.kruchinin
-    }
-  }
-}
-
 Копируем файл:
 cp /usr/hdp/3.0.1.0-187/hadoop-hdfs/hadoop-hdfs-client.jar /home/kruchininilya77/divolte-collector-0.9.0/lib/
 
 Запускаем divolte:
 ./bin/divolte-collector
 
-Kafka консьюмер:
-bin/kafka-console-consumer.sh --zookeeper 35.233.44.60:2181 --topic ilya.kruchinin --from-beginning
-
 Тест Divolte
 http://35.233.44.60:8290/#/fragment/path?q=textual&n=42
 
 JS:
-Так как магазин находится в облаке и доступ к машине не представляется возможным, то получить доступ к divolte.js с кластера можно посредством require.js
+Так как магазин находится в облаке и доступ к машине не представляется возможным,
+то получить доступ к divolte.js с кластера можно посредством require.js
 
 Конечный скрипт выглядит следующим образом:
 
@@ -198,28 +162,48 @@ addEvent(document, "DOMContentLoaded", function(event) {
 })
 </script>
 
-Запускаем divolte:
-./bin/divolte-collector
 
-Зайдите теперь на свой сайт и покликайте, попереходите на разные страницы.
-Вернитесь в терминал и нажмите Ctrl+C. 
+## -------------------------------------- KAFKA -------------------------------------------- ##
 
-Теперь посмотрите, появилось ли что-то в папке /divolte/published на HDFS:
-hdfs dfs -find /divolte/published/ -name '*divolte-tracking-*.avro' | sort | tail -n1| xargs /home/kruchininilya77/divolte-collector-0.9.0/bin/avro-tools tojson --pretty
+Конфиг для Kafka (Kafka-divolte):
 
-/*
-hdfs dfs -find /divolte/published '*divolte-tracking-*.avro' | sort | tail -n1 | xargs ~/divolte-collector-0.9.0/bin/avro-tools tojson --pretty | less
+divolte {
+  global {
 
-hdfs dfs -find /divolte/published/ -name '*divolte-tracking-*.avro' | sort | tail -n1| xargs ~/divolte-collector-0.9.0/bin/avro-tools tojson --pretty
+    server {
+      host = 0.0.0.0
+      port = 8290
+    }
 
-hdfs dfs -tail /divolte/published/20181010173741-divolte-tracking-de3-1-2.avr
-*/
+    kafka {
+      // Enable Kafka flushing
+      enabled = true
+      // The properties under the producer key in this
+      // configuration are used to create a Properties object
+      // which is passed to Kafka as is. At the very least,
+      // configure the broker list here. For more options
+      // that can be passed to a Kafka producer, see this link:
+      // https://kafka.apache.org/documentation.html#producerconfigs
+      producer = {
+        bootstrap.servers = "de3-node1.europe-west1-b.c.dataengineer-218321.internal:6667"
+      }
+    }
+  }
+  sinks {
+    // The name of the sink. ("It's referred to by the mapping.")
+    kafka {
+      type = kafka
+      // This is the name of the topic that data will be produced on
+      topic = ilya.kruchinin
+    }
+  }
+}
 
 Создаем mapper для divolte
 sudo su
 cd /divolte-collector-0.9.0/conf
 > MyEventRecord.avsc
-sudo nano MyEventRecord
+sudo nano MyEventRecord.avsc
 
 Добавляем в файл скрипт:
 {
@@ -257,16 +241,67 @@ mapping {
 
 sudo nano divolte-collector.conf
 
+-- Конечный divolte.conf для Kafka
 divolte {
+  global {
+
+    server {
+      host = 0.0.0.0
+      port = 8290
+    }
+
+    kafka {
+      // Enable Kafka flushing
+      enabled = true
+      // The properties under the producer key in this
+      // configuration are used to create a Properties object
+      // which is passed to Kafka as is. At the very least,
+      // configure the broker list here. For more options
+      // that can be passed to a Kafka producer, see this link:
+      // https://kafka.apache.org/documentation.html#producerconfigs
+      producer = {
+        bootstrap.servers = "de3-node1.europe-west1-b.c.dataengineer-218321.internal:6667"
+      }
+    }
+  }
+  sinks {
+    // The name of the sink. ("It's referred to by the mapping.")
+    kafka {
+      type = kafka
+      // This is the name of the topic that data will be produced on
+      topic = ilya.kruchinin
+    }
+  }
+  sources {
+    // Once we specify a source, we need to specify all of them.
+    // Here's the definition for the browser source we've been using until now.
+    browser = {
+      type = browser
+    }
+    // Here's the low-level JSON source we're adding.
+    json = {
+      type = json
+      event_path = /json
+    }
+  }
   mappings {
     my_mapping = {
       schema_file = "/home/kruchininilya77/divolte-collector-0.9.0/conf/MyEventRecord.avsc"
       mapping_script_file = "/home/kruchininilya77/divolte-collector-0.9.0/conf/mapping.groovy"
-      sources = [browser]
-      sinks = [hdfs]
+      sources = [browser, json]
+      sinks = [kafka]
     }
   }
 }
 
-Запускаем  divolte:
+Kafka консьюмер:
+bin/kafka-console-consumer.sh --zookeeper 35.233.44.60:2181 --topic ilya.kruchinin --from-beginning
+
+Тест Divolte
+http://35.233.44.60:8290/#/fragment/path?q=textual&n=42
+
+Запускаем divolte:
 ./bin/divolte-collector
+
+Зайдите теперь на свой сайт и покликайте, попереходите на разные страницы.
+Вернитесь в терминал и нажмите Ctrl+C. 
